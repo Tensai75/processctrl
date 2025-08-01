@@ -1,0 +1,116 @@
+linters-settings:
+  dupl:
+    threshold: 100
+  funlen:
+    lines: 100
+    statements: 50
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/tensai75/processctrl)
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+      - unnamedResult
+  gocyclo:
+    min-complexity: 15
+  goimports:
+    local-prefixes: github.com/tensai75/processctrl
+  mnd:
+    settings:
+      mnd:
+        checks: argument,case,condition,return
+  govet:
+    enable:
+      - shadow
+  lll:
+    line-length: 140
+  misspell:
+    locale: US
+  nolintlint:
+    allow-leading-space: true
+    allow-unused: false
+    require-explanation: false
+    require-specific: false
+  depguard:
+    rules:
+      main:
+        allow:
+          - $gostd
+          - golang.org/x/sys
+          - github.com/tensai75/processctrl
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - copyloopvar
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - mnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - staticcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - mnd
+        - funlen
+        - gocyclo
+        - goconst
+        - gosec
+    - path: example/
+      linters:
+        - depguard
+        - gosec
+        - errcheck
+        - mnd
+    - text: "G204: Subprocess launched with a potential tainted input"
+      linters:
+        - gosec
+    - text: "G115: integer overflow conversion"
+      linters:
+        - gosec
+
+run:
+  timeout: 5m
