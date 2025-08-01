@@ -1,5 +1,11 @@
 # processctrl
 
+[![CI](https://github.com/Tensai75/processctrl/workflows/CI/badge.svg)](https://github.com/Tensai75/processctrl/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Tensai75/processctrl)](https://goreportcard.com/report/github.com/Tensai75/processctrl)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Tensai75/processctrl.svg)](https://pkg.go.dev/github.com/Tensai75/processctrl)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Tensai75/processctrl)](https://github.com/Tensai75/processctrl/blob/main/go.mod)
+
 `processctrl` is a cross-platform Go package for managing external processes.
 It allows you to run a subprocess, read from its stdout and stderr via channels, pause/resume its execution, and kill it at any time.
 
@@ -31,64 +37,80 @@ go get github.com/tensai75/processctrl
 package main
 
 import (
-    "context"
-    "fmt"
-    "time"
-    "github.com/tensai75/processctrl"
+	"context"
+	"fmt"
+	"runtime"
+	"time"
+
+	"github.com/tensai75/processctrl"
 )
 
 func main() {
-    // Create a process with buffered channels (buffer size 10)
-    proc := processctrl.NewWithBuffer(10, "ping", "localhost")
+	// Create a process with buffered channels (buffer size: 10)
+	// Buffered channels help with high-output processes
+	// Use appropriate ping flags for continuous pinging on different platforms
+	var proc *processctrl.Process
+	if runtime.GOOS == "windows" {
+		// On Windows, use -t flag to ping continuously until stopped
+		proc = processctrl.NewWithBuffer(10, "ping", "-t", "localhost")
+	} else {
+		// On Unix systems (Linux/macOS), ping runs continuously by default
+		// but we can use -i to set interval to make it more responsive
+		proc = processctrl.NewWithBuffer(10, "ping", "-i", "1", "localhost")
+	}
 
-    // Run with context and timeout
-    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-    defer cancel()
+	// Run with context and timeout for automatic cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-    stdout, stderr, err := proc.RunWithContext(ctx)
-    if err != nil {
-        panic(err)
-    }
+	stdout, stderr, err := proc.RunWithContext(ctx)
+	if err != nil {
+		panic(err)
+	}
 
-    // Check process state
-    fmt.Printf("Process running: %v, PID: %d\n", proc.IsRunning(), proc.PID())
+	// Check process state
+	fmt.Printf("Process running: %v, PID: %d\n", proc.IsRunning(), proc.PID())
 
-    go func() {
-        for line := range stdout {
-            fmt.Println("STDOUT:", line)
-        }
-    }()
+	go func() {
+		for line := range stdout {
+			fmt.Println("STDOUT:", line)
+		}
+	}()
 
-    go func() {
-        for line := range stderr {
-            fmt.Println("STDERR:", line)
-        }
-    }()
+	go func() {
+		for line := range stderr {
+			fmt.Println("STDERR:", line)
+		}
+	}()
 
-    // For interactive processes, you can write to stdin
-    // proc.WriteString("some input\n")
+	time.Sleep(3 * time.Second)
+	fmt.Println("Pausing...")
+	if err := proc.Pause(); err != nil {
+		fmt.Printf("Failed to pause: %v\n", err)
+	} else {
+		fmt.Printf("Process paused: %v\n", proc.IsPaused())
+	}
 
-    time.Sleep(3 * time.Second)
-    fmt.Println("Pausing...")
-    proc.Pause()
+	time.Sleep(5 * time.Second)
+	fmt.Println("Resuming...")
+	if err := proc.Resume(); err != nil {
+		fmt.Printf("Failed to resume: %v\n", err)
+	} else {
+		fmt.Printf("Process paused: %v\n", proc.IsPaused())
+	}
 
-    time.Sleep(5 * time.Second)
-    fmt.Println("Resuming...")
-    proc.Resume()
+	time.Sleep(5 * time.Second)
+	fmt.Println("Terminating gracefully...")
+	if err := proc.Terminate(); err != nil {
+		fmt.Printf("Failed to terminate gracefully: %v\n", err)
+		fmt.Println("Force killing...")
+		proc.Kill()
+	}
 
-    time.Sleep(5 * time.Second)
-
-    // Try graceful termination first (SIGTERM on Unix, gentle close on Windows)
-    fmt.Println("Terminating gracefully...")
-    if err := proc.Terminate(); err != nil {
-        fmt.Println("Graceful termination failed, force killing...")
-        proc.Kill()
-    }
-
-    // Wait for process to complete and get exit status
-    if state, err := proc.Wait(); err == nil && state != nil {
-        fmt.Printf("Process exited with code: %d\n", state.ExitCode())
-    }
+	// Wait for process to complete
+	if state, err := proc.Wait(); err == nil && state != nil {
+		fmt.Printf("Process exited with code: %d\n", state.ExitCode())
+	}
 }
 ```
 
