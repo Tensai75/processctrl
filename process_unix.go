@@ -13,48 +13,33 @@ import (
 	"time"
 )
 
-// Pause suspends the process execution using SIGSTOP signal.
-// The process can be resumed later using Resume().
-// This method is thread-safe and uses POSIX signals for process control.
-//
-// Returns an error if:
-//   - The process is not running
-//   - The process is already paused
-//   - The SIGSTOP signal fails to be sent
-func (p *Process) Pause() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.running || p.paused {
-		return fmt.Errorf("process not running or already paused")
-	}
+// pauseUnix implements Unix-specific process suspension using SIGSTOP.
+func (p *Process) pauseUnix() error {
 	if err := p.cmd.Process.Signal(syscall.SIGSTOP); err != nil {
 		return fmt.Errorf("failed to pause process: %w", err)
 	}
-	p.paused = true
 	return nil
 }
 
-// Resume continues the execution of a paused process using SIGCONT signal.
-// This method is thread-safe and uses POSIX signals for process control.
-//
-// Returns an error if:
-//   - The process is not running
-//   - The process is not currently paused
-//   - The SIGCONT signal fails to be sent
-func (p *Process) Resume() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.running || !p.paused {
-		return fmt.Errorf("process not running or not paused")
-	}
+// pauseImpl provides the cross-platform interface for Unix.
+func (p *Process) pauseImpl() error {
+	return p.pauseUnix()
+}
+
+// resumeUnix implements Unix-specific process resumption using SIGCONT.
+func (p *Process) resumeUnix() error {
 	if err := p.cmd.Process.Signal(syscall.SIGCONT); err != nil {
 		return fmt.Errorf("failed to resume process: %w", err)
 	}
-	p.paused = false
 	return nil
 }
 
-// killWithSignal implements graceful and forceful process termination for Unix systems.
+// resumeImpl provides the cross-platform interface for Unix.
+func (p *Process) resumeImpl() error {
+	return p.resumeUnix()
+}
+
+// killWithSignalUnix implements graceful and forceful process termination for Unix systems.
 // When graceful is true, it first sends SIGTERM to allow the process to clean up,
 // then waits for the specified timeout before sending SIGKILL if needed.
 //
@@ -63,14 +48,7 @@ func (p *Process) Resume() error {
 //   - graceful: If true, attempts SIGTERM before SIGKILL; if false, uses SIGKILL immediately
 //
 // Returns an error if the termination operation fails.
-func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if !p.running {
-		return fmt.Errorf("process is not running")
-	}
-
+func (p *Process) killWithSignalUnix(timeout time.Duration, graceful bool) error {
 	if graceful {
 		// Try SIGTERM first
 		if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -86,8 +64,6 @@ func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
 		select {
 		case <-done:
 			// Process exited gracefully
-			p.running = false
-			p.paused = false
 			return nil
 		case <-time.After(timeout):
 			// Timeout, force kill
@@ -95,10 +71,10 @@ func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
 	}
 
 	// Force kill with SIGKILL
-	err := p.cmd.Process.Kill()
-	if err == nil {
-		p.running = false
-		p.paused = false
-	}
-	return err
+	return p.cmd.Process.Kill()
+}
+
+// killWithSignalImpl provides the cross-platform interface for Unix.
+func (p *Process) killWithSignalImpl(timeout time.Duration, graceful bool) error {
+	return p.killWithSignalUnix(timeout, graceful)
 }

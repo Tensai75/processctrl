@@ -367,3 +367,79 @@ func (p *Process) Write(data []byte) error {
 func (p *Process) WriteString(s string) error {
 	return p.Write([]byte(s))
 }
+
+// Pause suspends the process execution.
+// The process can be resumed later using Resume().
+// This method is thread-safe and uses platform-specific implementations:
+//   - Unix: SIGSTOP signal
+//   - Windows: NtSuspendProcess API
+//
+// Returns an error if:
+//   - The process is not running
+//   - The process is already paused
+//   - The platform-specific pause operation fails
+func (p *Process) Pause() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.running || p.paused {
+		return fmt.Errorf("process not running or already paused")
+	}
+
+	if err := p.pauseImpl(); err != nil {
+		return err
+	}
+
+	p.paused = true
+	return nil
+}
+
+// Resume continues the execution of a paused process.
+// This method is thread-safe and uses platform-specific implementations:
+//   - Unix: SIGCONT signal
+//   - Windows: NtResumeProcess API
+//
+// Returns an error if:
+//   - The process is not running
+//   - The process is not currently paused
+//   - The platform-specific resume operation fails
+func (p *Process) Resume() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.running || !p.paused {
+		return fmt.Errorf("process not running or not paused")
+	}
+
+	if err := p.resumeImpl(); err != nil {
+		return err
+	}
+
+	p.paused = false
+	return nil
+}
+
+// killWithSignal implements graceful and forceful process termination.
+// This method provides a unified interface that delegates to platform-specific
+// implementations for handling process termination.
+//
+// Parameters:
+//   - timeout: Maximum time to wait for graceful shutdown before force-killing
+//   - graceful: If true, attempts gentle termination before force-kill; if false, uses force-kill immediately
+//
+// Returns an error if the termination operation fails.
+func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.running {
+		return fmt.Errorf("process is not running")
+	}
+
+	err := p.killWithSignalImpl(timeout, graceful)
+	if err == nil {
+		p.running = false
+		p.paused = false
+	}
+	return err
+}

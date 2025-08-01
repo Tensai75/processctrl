@@ -52,23 +52,8 @@ var (
 	procNtSuspendProcess = modntdll.NewProc("NtSuspendProcess")
 )
 
-// Pause suspends the process execution using Windows NT API NtSuspendProcess.
-// The process can be resumed later using Resume().
-// This method is thread-safe and uses Windows-specific process suspension.
-//
-// Returns an error if:
-//   - The process is not running
-//   - The process is already paused
-//   - Failed to open the process handle
-//   - NtSuspendProcess API call fails
-func (p *Process) Pause() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if !p.running || p.paused {
-		return fmt.Errorf("process not running or already paused")
-	}
-
+// pauseWindows implements Windows-specific process suspension using NtSuspendProcess.
+func (p *Process) pauseWindows() error {
 	h, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, uint32(p.cmd.Process.Pid))
 	if err != nil {
 		return fmt.Errorf("failed to open process for suspend: %w", err)
@@ -81,26 +66,16 @@ func (p *Process) Pause() error {
 		return fmt.Errorf("NtSuspendProcess failed: status=0x%.8X", r1)
 	}
 
-	p.paused = true
 	return nil
 }
 
-// Resume continues the execution of a paused process using Windows NT API NtResumeProcess.
-// This method is thread-safe and uses Windows-specific process resumption.
-//
-// Returns an error if:
-//   - The process is not running
-//   - The process is not currently paused
-//   - Failed to open the process handle
-//   - NtResumeProcess API call fails
-func (p *Process) Resume() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+// pauseImpl provides the cross-platform interface for Windows.
+func (p *Process) pauseImpl() error {
+	return p.pauseWindows()
+}
 
-	if !p.running || !p.paused {
-		return fmt.Errorf("process not running or not paused")
-	}
-
+// resumeWindows implements Windows-specific process resumption using NtResumeProcess.
+func (p *Process) resumeWindows() error {
 	h, err := windows.OpenProcess(windows.PROCESS_SUSPEND_RESUME, false, uint32(p.cmd.Process.Pid))
 	if err != nil {
 		return fmt.Errorf("failed to open process for resume: %w", err)
@@ -113,11 +88,15 @@ func (p *Process) Resume() error {
 		return fmt.Errorf("NtResumeProcess failed: status=0x%.8X", r1)
 	}
 
-	p.paused = false
 	return nil
 }
 
-// killWithSignal implements graceful and forceful process termination for Windows systems.
+// resumeImpl provides the cross-platform interface for Windows.
+func (p *Process) resumeImpl() error {
+	return p.resumeWindows()
+}
+
+// killWithSignalWindows implements graceful and forceful process termination for Windows systems.
 // Unlike Unix systems that use signals, Windows uses TerminateProcess API calls.
 // When graceful is true, it first tries TerminateProcess with exit code 1,
 // then waits for the specified timeout before using Kill() if needed.
@@ -127,14 +106,7 @@ func (p *Process) Resume() error {
 //   - graceful: If true, attempts gentle termination before force-kill; if false, uses Kill() immediately
 //
 // Returns an error if the termination operation fails.
-func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if !p.running {
-		return fmt.Errorf("process is not running")
-	}
-
+func (p *Process) killWithSignalWindows(timeout time.Duration, graceful bool) error {
 	if graceful {
 		// On Windows, we don't have SIGTERM, so we'll try a gentle approach
 		// by giving the process a chance to exit gracefully
@@ -154,8 +126,6 @@ func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
 		select {
 		case <-done:
 			// Process exited gracefully
-			p.running = false
-			p.paused = false
 			return nil
 		case <-time.After(timeout):
 			// Timeout, force kill
@@ -163,10 +133,10 @@ func (p *Process) killWithSignal(timeout time.Duration, graceful bool) error {
 	}
 
 	// Force kill
-	err := p.cmd.Process.Kill()
-	if err == nil {
-		p.running = false
-		p.paused = false
-	}
-	return err
+	return p.cmd.Process.Kill()
+}
+
+// killWithSignalImpl provides the cross-platform interface for Windows.
+func (p *Process) killWithSignalImpl(timeout time.Duration, graceful bool) error {
+	return p.killWithSignalWindows(timeout, graceful)
 }
